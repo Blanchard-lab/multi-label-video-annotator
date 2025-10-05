@@ -1,10 +1,150 @@
-from mlva_app import MLVAApp
 import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import cv2
+from PIL import Image, ImageTk
+import os
+import json
+from datetime import datetime
+import threading
+import time
+from widgets import ToggleSwitch
+from audio import AudioPlayer
 
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = MLVAApp(root)
-    root.mainloop()
+class MLVAApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("MultiLabel Video Annotator")
+        self.root.geometry("1200x700")
+        
+        self.colors = {
+            'primary': '#6366f1',
+            'secondary': '#8b5cf6',
+            'success': '#10b981',
+            'background': '#f8fafc',
+            'card': '#ffffff',
+            'text': '#1e293b',
+            'text_light': '#64748b',
+            'border': '#e2e8f0'
+        }
+        
+        self.root.configure(bg=self.colors['background'])
+        
+        self.labels_config = ["label1", "label2"]
+        self.current_folder = None
+        self.video_files = []
+        self.current_video = None
+        self.cap = None
+        self.is_playing = False
+        self.current_frame = None
+        self.label_states = {}
+        self.panel_orientation = "right"
+        self.volume = 50
+        self.audio = AudioPlayer()
+        self.is_seeking = False
+        
+        self.show_home_page()
+    
+    def show_home_page(self):
+        for widget in self.root.winfo_children():
+            widget.destroy()
+        
+        home_frame = tk.Frame(self.root, bg=self.colors['background'])
+        home_frame.pack(expand=True, fill="both")
+        
+        content_frame = tk.Frame(home_frame, bg=self.colors['background'])
+        content_frame.place(relx=0.5, rely=0.5, anchor="center")
+        
+        title = tk.Label(content_frame, text="MultiLabel Video Annotator", 
+                        font=("Segoe UI", 36, "bold"), 
+                        fg=self.colors['primary'], 
+                        bg=self.colors['background'])
+        title.pack(pady=(0, 10))
+        
+        subtitle = tk.Label(content_frame, text="Annotate videos with custom labels", 
+                           font=("Segoe UI", 14), 
+                           fg=self.colors['text_light'], 
+                           bg=self.colors['background'])
+        subtitle.pack(pady=(0, 40))
+        
+        card_frame = tk.Frame(content_frame, bg=self.colors['card'], relief="flat", bd=0)
+        card_frame.pack(pady=20, padx=40)
+        
+        self.add_shadow(card_frame)
+        
+        card_inner = tk.Frame(card_frame, bg=self.colors['card'])
+        card_inner.pack(padx=40, pady=30)
+        
+        tk.Label(card_inner, text="Configure Labels", 
+                font=("Segoe UI", 18, "bold"), 
+                fg=self.colors['text'], 
+                bg=self.colors['card']).pack(pady=(0, 20))
+        
+        labels_container = tk.Frame(card_inner, bg=self.colors['card'])
+        labels_container.pack(pady=10)
+        
+        list_frame = tk.Frame(labels_container, bg=self.colors['card'])
+        list_frame.pack(side="left", padx=(0, 20))
+        
+        self.labels_listbox = tk.Listbox(list_frame, height=6, width=25, 
+                                         font=("Segoe UI", 12),
+                                         bg="white",
+                                         fg=self.colors['text'],
+                                         selectbackground=self.colors['primary'],
+                                         selectforeground="white",
+                                         relief="solid",
+                                         bd=1,
+                                         highlightthickness=0)
+        self.labels_listbox.pack(side="left", padx=5)
+        
+        scrollbar = tk.Scrollbar(list_frame, command=self.labels_listbox.yview)
+        scrollbar.pack(side="left", fill="y")
+        self.labels_listbox.config(yscrollcommand=scrollbar.set)
+        
+        for label in self.labels_config:
+            self.labels_listbox.insert(tk.END, label)
+        
+        buttons_frame = tk.Frame(labels_container, bg=self.colors['card'])
+        buttons_frame.pack(side="left")
+        
+        btn_style = {
+            'font': ("Segoe UI", 11),
+            'width': 15,
+            'bd': 0,
+            'fg': 'white',
+            'cursor': 'hand2',
+            'relief': 'flat'
+        }
+        
+        add_btn = tk.Button(buttons_frame, text="➕ Add Label", 
+                           bg=self.colors['success'], 
+                           activebackground='#059669',
+                           command=self.add_label, **btn_style)
+        add_btn.pack(pady=5, fill="x")
+        
+        rename_btn = tk.Button(buttons_frame, text="✏️ Rename Label", 
+                              bg=self.colors['primary'], 
+                              activebackground='#4f46e5',
+                              command=self.rename_label, **btn_style)
+        rename_btn.pack(pady=5, fill="x")
+        
+        remove_btn = tk.Button(buttons_frame, text="🗑️ Remove Label", 
+                              bg='#ef4444', 
+                              activebackground='#dc2626',
+                              command=self.remove_label, **btn_style)
+        remove_btn.pack(pady=5, fill="x")
+        
+        open_btn = tk.Button(content_frame, text="📁 Open Folder", 
+                            command=self.open_folder, 
+                            font=("Segoe UI", 16, "bold"),
+                            bg=self.colors['secondary'],
+                            activebackground='#7c3aed',
+                            fg='white',
+                            width=20,
+                            height=2,
+                            bd=0,
+                            cursor='hand2',
+                            relief='flat')
+        open_btn.pack(pady=30)
     
     def add_shadow(self, widget):
         widget.config(highlightbackground=self.colors['border'], highlightthickness=1)
@@ -317,7 +457,7 @@ if __name__ == "__main__":
     
     def on_volume_change(self, value):
         self.volume = int(value)
-        if self.audio_process and self.audio_process.poll() is None:
+        if self.audio.audio_process and getattr(self.audio.audio_process, 'poll', lambda: 1)() is None:
             self.restart_audio()
     
     def on_seek(self, value):
@@ -327,9 +467,12 @@ if __name__ == "__main__":
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
             self.show_frame()
             
-            if self.audio_process and self.audio_process.poll() is None:
-                self.audio_process.terminate()
-                self.audio_process = None
+            if self.audio.audio_process and getattr(self.audio.audio_process, 'poll', lambda: 1)() is None:
+                try:
+                    self.audio.audio_process.terminate()
+                except Exception:
+                    pass
+                self.audio.audio_process = None
             
             self.root.after(100, lambda: setattr(self, 'is_seeking', False))
     
@@ -354,7 +497,7 @@ if __name__ == "__main__":
         selection = self.files_listbox.curselection()
         if selection:
             self.stop_video()
-            self.stop_audio()
+            self.audio.stop()
             video_name = self.files_listbox.get(selection[0])
             self.current_video = os.path.join(self.current_folder, video_name)
             self.load_video()
@@ -435,105 +578,26 @@ if __name__ == "__main__":
             self.start_audio()
             threading.Thread(target=self.play_video, daemon=True).start()
         else:
-            self.stop_audio()
+            self.audio.stop()
     
     def start_audio(self):
         if not self.current_video:
             return
         
-        self.stop_audio()
+        self.audio.stop()
         
         current_frame = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
         start_time = current_frame / self.fps if self.fps > 0 else 0
-        
-        try:
-            # Prefer ffplay on non-macOS systems when available. On macOS
-            # ffplay/ffmpeg can run into libavcodec pthread/fork issues when
-            # started from a multi-threaded Python process (causes assertions
-            # like "fctx->async_lock failed"). To avoid that, use a safe
-            # fallback: on macOS (darwin) try to use ffmpeg to extract a small
-            # temporary WAV starting at the requested time and play it with
-            # the native `afplay`. This avoids libavcodec assertions in the
-            # host process.
-            ffplay_path = shutil.which('ffplay')
-            ffmpeg_path = shutil.which('ffmpeg')
-            afplay_path = shutil.which('afplay')
-
-            if sys.platform != 'darwin' and ffplay_path:
-                # Use ffplay (most Unix/Windows systems)
-                if sys.platform == 'win32':
-                    startupinfo = subprocess.STARTUPINFO()
-                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                    self.audio_process = subprocess.Popen(
-                        [ffplay_path, '-nodisp', '-autoexit', '-ss', str(start_time),
-                         '-volume', str(self.volume), self.current_video],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        startupinfo=startupinfo
-                    )
-                else:
-                    # Start in new session to help isolate child process
-                    self.audio_process = subprocess.Popen(
-                        [ffplay_path, '-nodisp', '-autoexit', '-ss', str(start_time),
-                         '-volume', str(self.volume), self.current_video],
-                        stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
-                        start_new_session=True
-                    )
-            elif sys.platform == 'darwin' and ffmpeg_path and afplay_path:
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix='.wav')
-                tmp_path = tmp.name
-                tmp.close()
-                try:
-                    cmd = [ffmpeg_path, '-hide_banner', '-loglevel', 'error',
-                           '-ss', str(start_time), '-i', self.current_video,
-                           '-vn', '-acodec', 'pcm_s16le', '-ar', '44100', '-ac', '2',
-                           '-y', tmp_path]
-                    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-                    self.audio_process = subprocess.Popen([afplay_path, tmp_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
-                    self._audio_tempfile = tmp_path
-                except Exception:
-                    try:
-                        os.unlink(tmp_path)
-                    except Exception:
-                        pass
-                    self._audio_tempfile = None
-                    self.audio_process = None
-            elif ffplay_path:
-                self.audio_process = subprocess.Popen(
-                    [ffplay_path, '-nodisp', '-autoexit', '-ss', str(start_time),
-                     '-volume', str(self.volume), self.current_video],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True
-                )
-            else:
-                self.audio_process = None
-        except FileNotFoundError:
-            pass
+        self.audio.start(self.current_video, start_time=start_time, volume=self.volume)
     
     def stop_audio(self):
-        if self.audio_process and self.audio_process.poll() is None:
-            try:
-                self.audio_process.terminate()
-            except Exception:
-                try:
-                    self.audio_process.kill()
-                except Exception:
-                    pass
-            finally:
-                self.audio_process = None
-        if hasattr(self, '_audio_tempfile') and self._audio_tempfile:
-            try:
-                os.unlink(self._audio_tempfile)
-            except Exception:
-                pass
-            finally:
-                self._audio_tempfile = None
+        self.audio.stop()
     
     def restart_audio(self):
         if self.is_playing:
-            self.start_audio()
+            current_frame = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
+            start_time = current_frame / self.fps if self.fps > 0 else 0
+            self.audio.restart(self.current_video, start_time=start_time, volume=self.volume)
     
     def play_video(self):
         while self.is_playing and self.cap and self.cap.isOpened():
@@ -570,14 +634,14 @@ if __name__ == "__main__":
             else:
                 self.is_playing = False
                 self.play_button.config(text="▶ Play")
-                self.stop_audio()
+                self.audio.stop()
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 self.update_timeline()
                 break
     
     def stop_video(self):
         self.is_playing = False
-        self.stop_audio()
+        self.audio.stop()
         if hasattr(self, 'play_button'):
             self.play_button.config(text="▶ Play")
     
@@ -602,11 +666,6 @@ if __name__ == "__main__":
         messagebox.showinfo("Saved", f"Annotations saved to:\n{json_path}")
     
     def __del__(self):
-        self.stop_audio()
+        self.audio.stop()
         if self.cap:
             self.cap.release()
-
-if __name__ == "__main__":
-    root = tk.Tk()
-    app = MLVAApp(root)
-    root.mainloop()
