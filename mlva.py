@@ -199,7 +199,7 @@ if __name__ == "__main__":
             'pady': 8
         }
         
-        self.play_button = tk.Button(controls_frame, text="▶ Play", 
+        self.play_button = tk.Button(controls_frame, text="Play", 
                                      bg=self.colors['success'],
                                      activebackground='#059669',
                                      command=self.toggle_play, **btn_style)
@@ -208,7 +208,7 @@ if __name__ == "__main__":
         volume_frame = tk.Frame(controls_frame, bg='#2d2d2d')
         volume_frame.pack(side="left", padx=15)
         
-        tk.Label(volume_frame, text="🔊", font=("Segoe UI", 12),
+        tk.Label(volume_frame, text="Volume", font=("Segoe UI", 12),
                 fg='white', bg='#2d2d2d').pack(side="left", padx=5)
         
         self.volume_var = tk.IntVar(value=self.volume)
@@ -225,12 +225,12 @@ if __name__ == "__main__":
                                command=self.on_volume_change)
         volume_scale.pack(side="left")
         
-        tk.Button(controls_frame, text="🔄 Toggle Layout", 
+        tk.Button(controls_frame, text="Toggle Layout", 
                  bg=self.colors['primary'],
                  activebackground='#4f46e5',
                  command=self.toggle_layout, **btn_style).pack(side="left", padx=5)
         
-        tk.Button(controls_frame, text="🏠 Home", 
+        tk.Button(controls_frame, text="Home", 
                  bg='#64748b',
                  activebackground='#475569',
                  command=self.show_home_page, **btn_style).pack(side="right", padx=5)
@@ -299,7 +299,7 @@ if __name__ == "__main__":
             
             self.label_switches[label] = switch
         
-        save_btn = tk.Button(self.labels_panel_container, text="💾 Save Annotations", 
+        save_btn = tk.Button(self.labels_panel_container, text="Save Annotations", 
                             command=self.save_annotations,
                             font=("Segoe UI", 11, "bold"),
                             bg=self.colors['secondary'],
@@ -368,7 +368,7 @@ if __name__ == "__main__":
         self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
         self.is_playing = False
-        self.play_button.config(text="▶ Play")
+        self.play_button.config(text="Play")
         self.timeline_var.set(0)
         self.show_frame()
         self.update_timeline()
@@ -429,7 +429,7 @@ if __name__ == "__main__":
             return
         
         self.is_playing = not self.is_playing
-        self.play_button.config(text="⏸ Pause" if self.is_playing else "▶ Play")
+        self.play_button.config(text="Pause" if self.is_playing else "Play")
         
         if self.is_playing:
             self.start_audio()
@@ -447,20 +447,11 @@ if __name__ == "__main__":
         start_time = current_frame / self.fps if self.fps > 0 else 0
         
         try:
-            # Prefer ffplay on non-macOS systems when available. On macOS
-            # ffplay/ffmpeg can run into libavcodec pthread/fork issues when
-            # started from a multi-threaded Python process (causes assertions
-            # like "fctx->async_lock failed"). To avoid that, use a safe
-            # fallback: on macOS (darwin) try to use ffmpeg to extract a small
-            # temporary WAV starting at the requested time and play it with
-            # the native `afplay`. This avoids libavcodec assertions in the
-            # host process.
             ffplay_path = shutil.which('ffplay')
             ffmpeg_path = shutil.which('ffmpeg')
             afplay_path = shutil.which('afplay')
 
             if sys.platform != 'darwin' and ffplay_path:
-                # Use ffplay (most Unix/Windows systems)
                 if sys.platform == 'win32':
                     startupinfo = subprocess.STARTUPINFO()
                     startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -472,7 +463,6 @@ if __name__ == "__main__":
                         startupinfo=startupinfo
                     )
                 else:
-                    # Start in new session to help isolate child process
                     self.audio_process = subprocess.Popen(
                         [ffplay_path, '-nodisp', '-autoexit', '-ss', str(start_time),
                          '-volume', str(self.volume), self.current_video],
@@ -569,7 +559,7 @@ if __name__ == "__main__":
                 time.sleep(1/fps if fps > 0 else 0.033)
             else:
                 self.is_playing = False
-                self.play_button.config(text="▶ Play")
+                self.play_button.config(text="Play")
                 self.stop_audio()
                 self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 self.update_timeline()
@@ -579,7 +569,7 @@ if __name__ == "__main__":
         self.is_playing = False
         self.stop_audio()
         if hasattr(self, 'play_button'):
-            self.play_button.config(text="▶ Play")
+            self.play_button.config(text="Play")
     
     def save_annotations(self):
         if not self.current_video:

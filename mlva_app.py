@@ -1,21 +1,18 @@
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-import cv2
-from PIL import Image, ImageTk
 import os
 import json
 from datetime import datetime
-import threading
-import time
+import subprocess
+import sys
 from widgets import ToggleSwitch
-from audio import AudioPlayer
+
 
 class MLVAApp:
     def __init__(self, root):
         self.root = root
         self.root.title("MultiLabel Video Annotator")
         self.root.geometry("1200x700")
-        
         self.colors = {
             'primary': '#6366f1',
             'secondary': '#8b5cf6',
@@ -26,66 +23,61 @@ class MLVAApp:
             'text_light': '#64748b',
             'border': '#e2e8f0'
         }
-        
         self.root.configure(bg=self.colors['background'])
-        
-        self.labels_config = ["label1", "label2"]
+        self.labels_config = ["Confused", "Frustrated", "Optimistic", "Conflicted", "Curious", "Disengaged", "Surprised"]
         self.current_folder = None
         self.video_files = []
         self.current_video = None
-        self.cap = None
-        self.is_playing = False
-        self.current_frame = None
         self.label_states = {}
         self.panel_orientation = "right"
         self.volume = 50
-        self.audio = AudioPlayer()
-        self.is_seeking = False
-        
         self.show_home_page()
-    
+
+    def make_button(self, parent, text, command, width=15, font=("Segoe UI", 11, "bold")):
+        """Create a consistently styled button: white bg, black text, hover raise, light-blue active."""
+        btn = tk.Button(parent, text=text, command=command, width=width, font=font,
+                        bg='white', fg='black', activebackground='#e6f7ff', bd=1, relief='flat', cursor='hand2')
+        def on_enter(e):
+            btn.config(bg='#f7f7f7', relief='raised')
+
+        def on_leave(e):
+            btn.config(bg='white', relief='flat')
+        btn.bind('<Enter>', on_enter)
+        btn.bind('<Leave>', on_leave)
+        return btn
+
     def show_home_page(self):
         for widget in self.root.winfo_children():
             widget.destroy()
-        
         home_frame = tk.Frame(self.root, bg=self.colors['background'])
         home_frame.pack(expand=True, fill="both")
-        
         content_frame = tk.Frame(home_frame, bg=self.colors['background'])
         content_frame.place(relx=0.5, rely=0.5, anchor="center")
-        
-        title = tk.Label(content_frame, text="MultiLabel Video Annotator", 
-                        font=("Segoe UI", 36, "bold"), 
-                        fg=self.colors['primary'], 
-                        bg=self.colors['background'])
+        title = tk.Label(content_frame, text="MultiLabel Video Annotator",
+                         font=("Segoe UI", 36, "bold"),
+                         fg=self.colors['primary'],
+                         bg=self.colors['background'])
         title.pack(pady=(0, 10))
-        
-        subtitle = tk.Label(content_frame, text="Annotate videos with custom labels", 
-                           font=("Segoe UI", 14), 
-                           fg=self.colors['text_light'], 
-                           bg=self.colors['background'])
+        subtitle = tk.Label(content_frame, text="Annotate videos with custom labels",
+                            font=("Segoe UI", 14),
+                            fg=self.colors['text_light'],
+                            bg=self.colors['background'])
         subtitle.pack(pady=(0, 40))
-        
         card_frame = tk.Frame(content_frame, bg=self.colors['card'], relief="flat", bd=0)
         card_frame.pack(pady=20, padx=40)
-        
         self.add_shadow(card_frame)
-        
         card_inner = tk.Frame(card_frame, bg=self.colors['card'])
         card_inner.pack(padx=40, pady=30)
-        
-        tk.Label(card_inner, text="Configure Labels", 
-                font=("Segoe UI", 18, "bold"), 
-                fg=self.colors['text'], 
-                bg=self.colors['card']).pack(pady=(0, 20))
-        
+        tk.Label(card_inner, text="Configure Labels",
+                 font=("Segoe UI", 18, "bold"),
+                 fg=self.colors['text'],
+                 bg=self.colors['card']).pack(pady=(0, 20))
         labels_container = tk.Frame(card_inner, bg=self.colors['card'])
         labels_container.pack(pady=10)
-        
         list_frame = tk.Frame(labels_container, bg=self.colors['card'])
         list_frame.pack(side="left", padx=(0, 20))
-        
-        self.labels_listbox = tk.Listbox(list_frame, height=6, width=25, 
+
+        self.labels_listbox = tk.Listbox(list_frame, height=6, width=25,
                                          font=("Segoe UI", 12),
                                          bg="white",
                                          fg=self.colors['text'],
@@ -95,60 +87,34 @@ class MLVAApp:
                                          bd=1,
                                          highlightthickness=0)
         self.labels_listbox.pack(side="left", padx=5)
-        
+
         scrollbar = tk.Scrollbar(list_frame, command=self.labels_listbox.yview)
         scrollbar.pack(side="left", fill="y")
         self.labels_listbox.config(yscrollcommand=scrollbar.set)
-        
+
         for label in self.labels_config:
             self.labels_listbox.insert(tk.END, label)
-        
+
         buttons_frame = tk.Frame(labels_container, bg=self.colors['card'])
         buttons_frame.pack(side="left")
-        
-        btn_style = {
-            'font': ("Segoe UI", 11),
-            'width': 15,
-            'bd': 0,
-            'fg': 'white',
-            'cursor': 'hand2',
-            'relief': 'flat'
-        }
-        
-        add_btn = tk.Button(buttons_frame, text="➕ Add Label", 
-                           bg=self.colors['success'], 
-                           activebackground='#059669',
-                           command=self.add_label, **btn_style)
+
+        add_btn = self.make_button(buttons_frame, text="Add Label", command=self.add_label)
         add_btn.pack(pady=5, fill="x")
-        
-        rename_btn = tk.Button(buttons_frame, text="✏️ Rename Label", 
-                              bg=self.colors['primary'], 
-                              activebackground='#4f46e5',
-                              command=self.rename_label, **btn_style)
+
+        rename_btn = self.make_button(buttons_frame, text="Rename Label", command=self.rename_label)
         rename_btn.pack(pady=5, fill="x")
-        
-        remove_btn = tk.Button(buttons_frame, text="🗑️ Remove Label", 
-                              bg='#ef4444', 
-                              activebackground='#dc2626',
-                              command=self.remove_label, **btn_style)
+
+        remove_btn = self.make_button(buttons_frame, text="Remove Label", command=self.remove_label)
         remove_btn.pack(pady=5, fill="x")
-        
-        open_btn = tk.Button(content_frame, text="📁 Open Folder", 
-                            command=self.open_folder, 
-                            font=("Segoe UI", 16, "bold"),
-                            bg=self.colors['secondary'],
-                            activebackground='#7c3aed',
-                            fg='white',
-                            width=20,
-                            height=2,
-                            bd=0,
-                            cursor='hand2',
-                            relief='flat')
+
+        open_btn = self.make_button(content_frame, text="Open Folder", command=self.open_folder, width=20,
+                                    font=("Segoe UI", 16, "bold"))
+        open_btn.config(height=2)
         open_btn.pack(pady=30)
-    
+
     def add_shadow(self, widget):
         widget.config(highlightbackground=self.colors['border'], highlightthickness=1)
-    
+
     def add_label(self):
         dialog = tk.Toplevel(self.root)
         dialog.title("Add Label")
@@ -156,60 +122,52 @@ class MLVAApp:
         dialog.configure(bg=self.colors['background'])
         dialog.transient(self.root)
         dialog.grab_set()
-        
-        tk.Label(dialog, text="Label Name:", 
-                font=("Segoe UI", 12), 
-                bg=self.colors['background'],
-                fg=self.colors['text']).pack(pady=15)
-        
+
+        tk.Label(dialog, text="Label Name:",
+                 font=("Segoe UI", 12),
+                 bg=self.colors['background'],
+                 fg=self.colors['text']).pack(pady=15)
+
         entry = tk.Entry(dialog, width=30, font=("Segoe UI", 11), relief="solid", bd=1)
         entry.pack(pady=5, ipady=5)
         entry.focus()
-        
+
         def save():
             name = entry.get().strip()
             if name and name not in self.labels_config:
                 self.labels_config.append(name)
                 self.labels_listbox.insert(tk.END, name)
                 dialog.destroy()
-        
+
         entry.bind("<Return>", lambda e: save())
-        
-        tk.Button(dialog, text="Add", command=save, 
-                 font=("Segoe UI", 11, "bold"),
-                 bg=self.colors['success'],
-                 fg='white',
-                 width=15,
-                 bd=0,
-                 cursor='hand2',
-                 relief='flat').pack(pady=15)
-    
+        self.make_button(dialog, text="Add", command=save, width=15).pack(pady=15)
+
     def rename_label(self):
         selection = self.labels_listbox.curselection()
         if not selection:
             return
-        
+
         idx = selection[0]
         old_name = self.labels_config[idx]
-        
+
         dialog = tk.Toplevel(self.root)
         dialog.title("Rename Label")
         dialog.geometry("350x150")
         dialog.configure(bg=self.colors['background'])
         dialog.transient(self.root)
         dialog.grab_set()
-        
-        tk.Label(dialog, text="New Label Name:", 
-                font=("Segoe UI", 12), 
-                bg=self.colors['background'],
-                fg=self.colors['text']).pack(pady=15)
-        
+
+        tk.Label(dialog, text="New Label Name:",
+                 font=("Segoe UI", 12),
+                 bg=self.colors['background'],
+                 fg=self.colors['text']).pack(pady=15)
+
         entry = tk.Entry(dialog, width=30, font=("Segoe UI", 11), relief="solid", bd=1)
         entry.insert(0, old_name)
         entry.pack(pady=5, ipady=5)
         entry.focus()
         entry.select_range(0, tk.END)
-        
+
         def save():
             name = entry.get().strip()
             if name and name not in self.labels_config:
@@ -217,25 +175,17 @@ class MLVAApp:
                 self.labels_listbox.delete(idx)
                 self.labels_listbox.insert(idx, name)
                 dialog.destroy()
-        
+
         entry.bind("<Return>", lambda e: save())
-        
-        tk.Button(dialog, text="Rename", command=save, 
-                 font=("Segoe UI", 11, "bold"),
-                 bg=self.colors['primary'],
-                 fg='white',
-                 width=15,
-                 bd=0,
-                 cursor='hand2',
-                 relief='flat').pack(pady=15)
-    
+        self.make_button(dialog, text="Rename", command=save, width=15).pack(pady=15)
+
     def remove_label(self):
         selection = self.labels_listbox.curselection()
         if selection:
             idx = selection[0]
             self.labels_config.pop(idx)
             self.labels_listbox.delete(idx)
-    
+
     def open_folder(self):
         folder = filedialog.askdirectory()
         if folder:
@@ -245,279 +195,199 @@ class MLVAApp:
                 self.show_main_interface()
             else:
                 messagebox.showinfo("No Videos", "No video files found in the selected folder.")
-    
+
     def scan_video_files(self):
         extensions = ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.webm']
         self.video_files = []
-        for file in os.listdir(self.current_folder):
-            if any(file.lower().endswith(ext) for ext in extensions):
-                self.video_files.append(file)
+        try:
+            for file in os.listdir(self.current_folder):
+                if any(file.lower().endswith(ext) for ext in extensions):
+                    self.video_files.append(file)
+        except Exception:
+            self.video_files = []
         self.video_files.sort()
-    
+
     def show_main_interface(self):
         for widget in self.root.winfo_children():
             widget.destroy()
-        
-        self.root.configure(bg='#1e1e1e')
-        
+
+        self.root.configure(bg='#f0f4f8')
+
         self.main_container = ttk.PanedWindow(self.root, orient="horizontal")
         self.main_container.pack(fill="both", expand=True)
-        
-        self.left_frame = tk.Frame(self.main_container, width=200, bg='#2d2d2d')
+
+        self.left_frame = tk.Frame(self.main_container, width=240, bg='#ffffff')
         self.main_container.add(self.left_frame, weight=0)
-        
-        header_frame = tk.Frame(self.left_frame, bg='#2d2d2d')
+
+        header_frame = tk.Frame(self.left_frame, bg='#ffffff')
         header_frame.pack(fill="x", pady=10)
-        
-        tk.Label(header_frame, text="Video Files", 
-                font=("Segoe UI", 13, "bold"), 
-                fg='white',
-                bg='#2d2d2d').pack()
-        
-        listbox_frame = tk.Frame(self.left_frame, bg='#2d2d2d')
+
+        tk.Label(header_frame, text="Video Files",
+                 font=("Segoe UI", 13, "bold"),
+                 fg='black',
+                 bg='#ffffff').pack()
+
+        listbox_frame = tk.Frame(self.left_frame, bg='#ffffff')
         listbox_frame.pack(fill="both", expand=True, padx=5, pady=5)
-        
+
         scrollbar = tk.Scrollbar(listbox_frame)
         scrollbar.pack(side="right", fill="y")
-        
-        self.files_listbox = tk.Listbox(listbox_frame, 
-                                        yscrollcommand=scrollbar.set, 
+
+        self.files_listbox = tk.Listbox(listbox_frame,
+                                        yscrollcommand=scrollbar.set,
                                         font=("Segoe UI", 10),
-                                        bg='#1e1e1e',
-                                        fg='white',
-                                        selectbackground=self.colors['primary'],
-                                        selectforeground='white',
+                                        bg='white',
+                                        fg='black',
+                                        selectbackground='#e6f7ff',
+                                        selectforeground='black',
                                         bd=0,
                                         highlightthickness=0)
         self.files_listbox.pack(side="left", fill="both", expand=True)
         scrollbar.config(command=self.files_listbox.yview)
-        
+
         for video in self.video_files:
             self.files_listbox.insert(tk.END, video)
-        
+
         self.files_listbox.bind("<<ListboxSelect>>", self.on_video_select)
-        
-        self.middle_frame = tk.Frame(self.main_container, bg='#1e1e1e')
+
+        self.middle_frame = tk.Frame(self.main_container, bg='#ffffff')
         self.main_container.add(self.middle_frame, weight=1)
-        
-        self.video_label = tk.Label(self.middle_frame, text="Select a video to play", 
-                                    background="black", foreground="white",
-                                    font=("Segoe UI", 14))
-        self.video_label.pack(fill="both", expand=True, padx=10, pady=10)
-        
-        timeline_frame = tk.Frame(self.middle_frame, bg='#2d2d2d')
-        timeline_frame.pack(fill="x", padx=10, pady=(0, 5))
-        
-        self.time_label = tk.Label(timeline_frame, text="00:00 / 00:00", 
-                                   font=("Segoe UI", 9),
-                                   fg='white', bg='#2d2d2d')
-        self.time_label.pack(side="left", padx=5)
-        
-        self.timeline_var = tk.DoubleVar()
-        self.timeline_scale = tk.Scale(timeline_frame, from_=0, to=100, 
-                                       orient="horizontal",
-                                       variable=self.timeline_var,
-                                       showvalue=False,
-                                       bg='#2d2d2d',
-                                       fg='white',
-                                       highlightthickness=0,
-                                       troughcolor='#1e1e1e',
-                                       activebackground=self.colors['primary'],
-                                       command=self.on_seek)
-        self.timeline_scale.pack(side="left", fill="x", expand=True, padx=5)
-        
-        controls_frame = tk.Frame(self.middle_frame, bg='#2d2d2d')
+
+        info_frame = tk.Frame(self.middle_frame, bg='white')
+        info_frame.pack(fill='both', expand=True, padx=10, pady=10)
+
+        self.selected_label = tk.Label(info_frame, text="No video selected", font=("Segoe UI", 14, "bold"), bg='white', fg='black')
+        self.selected_label.pack(pady=(30, 10))
+
+        self.selected_path = tk.Label(info_frame, text="", font=("Segoe UI", 10), bg='white', fg='black')
+        self.selected_path.pack()
+
+        controls_frame = tk.Frame(self.middle_frame, bg='#ffffff')
         controls_frame.pack(fill="x", pady=5)
-        
-        btn_style = {
-            'font': ("Segoe UI", 10, "bold"),
-            'bd': 0,
-            'fg': 'white',
-            'cursor': 'hand2',
-            'relief': 'flat',
-            'padx': 15,
-            'pady': 8
-        }
-        
-        self.play_button = tk.Button(controls_frame, text="▶ Play", 
-                                     bg=self.colors['success'],
-                                     activebackground='#059669',
-                                     command=self.toggle_play, **btn_style)
-        self.play_button.pack(side="left", padx=5)
-        
-        volume_frame = tk.Frame(controls_frame, bg='#2d2d2d')
-        volume_frame.pack(side="left", padx=15)
-        
-        tk.Label(volume_frame, text="🔊", font=("Segoe UI", 12),
-                fg='white', bg='#2d2d2d').pack(side="left", padx=5)
-        
-        self.volume_var = tk.IntVar(value=self.volume)
-        volume_scale = tk.Scale(volume_frame, from_=0, to=100, 
-                               orient="horizontal",
-                               variable=self.volume_var,
-                               showvalue=True,
-                               length=100,
-                               bg='#2d2d2d',
-                               fg='white',
-                               highlightthickness=0,
-                               troughcolor='#1e1e1e',
-                               activebackground=self.colors['primary'],
-                               command=self.on_volume_change)
-        volume_scale.pack(side="left")
-        
-        tk.Button(controls_frame, text="🔄 Toggle Layout", 
-                 bg=self.colors['primary'],
-                 activebackground='#4f46e5',
-                 command=self.toggle_layout, **btn_style).pack(side="left", padx=5)
-        
-        tk.Button(controls_frame, text="🏠 Home", 
-                 bg='#64748b',
-                 activebackground='#475569',
-                 command=self.show_home_page, **btn_style).pack(side="right", padx=5)
-        
+
+        self.make_button(controls_frame, text="Toggle Layout", command=self.toggle_layout).pack(side="left", padx=5)
+        self.make_button(controls_frame, text="Home", command=self.show_home_page).pack(side="right", padx=5)
         self.setup_labels_panel()
-    
+
     def setup_labels_panel(self):
-        if hasattr(self, 'labels_panel_container'):
-            self.labels_panel_container.destroy()
-        
+        if hasattr(self, 'labels_panel_container') and self.labels_panel_container:
+            try:
+                self.main_container.forget(self.labels_panel_container)
+            except Exception:
+                pass
+            try:
+                self.labels_panel_container.destroy()
+            except Exception:
+                pass
+
         if self.panel_orientation == "right":
-            self.labels_panel_container = tk.Frame(self.main_container, width=280, bg='#2d2d2d')
+            self.labels_panel_container = tk.Frame(self.main_container, width=280, bg='#ffffff')
             self.main_container.add(self.labels_panel_container, weight=0)
         else:
-            self.labels_panel_container = tk.Frame(self.root, bg='#2d2d2d')
+            self.labels_panel_container = tk.Frame(self.root, bg='#ffffff')
             self.labels_panel_container.pack(side="bottom", fill="x", pady=5)
-        
-        header = tk.Frame(self.labels_panel_container, bg='#2d2d2d')
+
+        header = tk.Frame(self.labels_panel_container, bg='#ffffff')
         header.pack(fill="x", pady=10)
-        
-        tk.Label(header, text="Labels", 
-                font=("Segoe UI", 13, "bold"), 
-                fg='white',
-                bg='#2d2d2d').pack()
-        
+
+        tk.Label(header, text="Labels",
+                 font=("Segoe UI", 13, "bold"),
+                 fg='black',
+                 bg='#ffffff').pack()
+
         if self.panel_orientation == "right":
-            labels_scroll_frame = tk.Frame(self.labels_panel_container, bg='#2d2d2d')
+            labels_scroll_frame = tk.Frame(self.labels_panel_container, bg='#ffffff')
             labels_scroll_frame.pack(fill="both", expand=True, padx=10)
-            
-            canvas = tk.Canvas(labels_scroll_frame, bg='#2d2d2d', highlightthickness=0)
+
+            canvas = tk.Canvas(labels_scroll_frame, bg='#ffffff', highlightthickness=0)
             scrollbar = tk.Scrollbar(labels_scroll_frame, orient="vertical", command=canvas.yview)
-            self.labels_inner_frame = tk.Frame(canvas, bg='#2d2d2d')
-            
+            self.labels_inner_frame = tk.Frame(canvas, bg='#ffffff')
+
             self.labels_inner_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
             canvas.create_window((0, 0), window=self.labels_inner_frame, anchor="nw")
             canvas.configure(yscrollcommand=scrollbar.set)
-            
+
             canvas.pack(side="left", fill="both", expand=True)
             scrollbar.pack(side="right", fill="y")
         else:
-            self.labels_inner_frame = tk.Frame(self.labels_panel_container, bg='#2d2d2d')
+            self.labels_inner_frame = tk.Frame(self.labels_panel_container, bg='#ffffff')
             self.labels_inner_frame.pack(fill="both", expand=True, padx=20, pady=10)
-        
+
         self.label_switches = {}
-        
+
         for label in self.labels_config:
             if label not in self.label_states:
                 self.label_states[label] = 0
-            
-            frame = tk.Frame(self.labels_inner_frame, bg='#3d3d3d', relief="flat")
-            frame.pack(fill="x", pady=5, padx=5) if self.panel_orientation == "right" else frame.pack(side="left", padx=10, pady=5)
-            
-            inner_frame = tk.Frame(frame, bg='#3d3d3d')
+
+            frame = tk.Frame(self.labels_inner_frame, bg='#f7f9fb', relief="flat")
+            if self.panel_orientation == "right":
+                frame.pack(fill="x", pady=5, padx=5)
+            else:
+                frame.pack(side="left", padx=10, pady=5)
+
+            inner_frame = tk.Frame(frame, bg='#f7f9fb')
             inner_frame.pack(padx=15, pady=12)
-            
-            label_text = tk.Label(inner_frame, text=label, 
-                                 font=("Segoe UI", 11, "bold"), 
-                                 fg='white',
-                                 bg='#3d3d3d')
-            label_text.pack(side="left" if self.panel_orientation == "right" else "top", pady=(0, 5) if self.panel_orientation == "bottom" else 0)
-            
-            switch = ToggleSwitch(inner_frame, width=50, height=26, 
+
+            label_text = tk.Label(inner_frame, text=label,
+                                 font=("Segoe UI", 11, "bold"),
+                                 fg='black',
+                                 bg='#f7f9fb')
+            if self.panel_orientation == "right":
+                label_text.pack(side="left")
+            else:
+                label_text.pack()
+
+            switch = ToggleSwitch(inner_frame, width=50, height=26,
                                  callback=lambda state, l=label: self.on_switch_toggle(l, state))
-            switch.pack(side="right" if self.panel_orientation == "right" else "top", padx=(10, 0) if self.panel_orientation == "right" else 0)
+            if self.panel_orientation == "right":
+                switch.pack(side="right", padx=(10, 0))
+            else:
+                switch.pack()
             switch.set_state(bool(self.label_states[label]))
-            
+
             self.label_switches[label] = switch
-        
-        save_btn = tk.Button(self.labels_panel_container, text="💾 Save Annotations", 
-                            command=self.save_annotations,
-                            font=("Segoe UI", 11, "bold"),
-                            bg=self.colors['secondary'],
-                            activebackground='#7c3aed',
-                            fg='white',
-                            bd=0,
-                            cursor='hand2',
-                            relief='flat',
-                            padx=20,
-                            pady=10)
+
+        save_btn = self.make_button(self.labels_panel_container, text="Save Annotations", command=self.save_annotations, width=20)
+        save_btn.config(padx=20, pady=10)
         save_btn.pack(pady=15, padx=10, fill="x")
-    
+
     def on_switch_toggle(self, label, state):
         self.label_states[label] = 1 if state else 0
-    
+
     def on_volume_change(self, value):
         self.volume = int(value)
-        if self.audio.audio_process and getattr(self.audio.audio_process, 'poll', lambda: 1)() is None:
-            self.restart_audio()
-    
+
     def on_seek(self, value):
-        if self.cap and not self.is_seeking:
-            self.is_seeking = True
-            frame_pos = int((float(value) / 100) * self.total_frames)
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
-            self.show_frame()
-            
-            if self.audio.audio_process and getattr(self.audio.audio_process, 'poll', lambda: 1)() is None:
-                try:
-                    self.audio.audio_process.terminate()
-                except Exception:
-                    pass
-                self.audio.audio_process = None
-            
-            self.root.after(100, lambda: setattr(self, 'is_seeking', False))
-    
+        pass
+
     def update_timeline(self):
-        if self.cap and self.cap.isOpened() and not self.is_seeking:
-            current_frame = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
-            progress = (current_frame / self.total_frames) * 100 if self.total_frames > 0 else 0
-            self.timeline_var.set(progress)
-            
-            current_time = current_frame / self.fps if self.fps > 0 else 0
-            total_time = self.total_frames / self.fps if self.fps > 0 else 0
-            
-            current_str = time.strftime('%M:%S', time.gmtime(current_time))
-            total_str = time.strftime('%M:%S', time.gmtime(total_time))
-            self.time_label.config(text=f"{current_str} / {total_str}")
-    
+        pass
+
     def toggle_layout(self):
         self.panel_orientation = "bottom" if self.panel_orientation == "right" else "right"
         self.setup_labels_panel()
-    
+
     def on_video_select(self, event):
         selection = self.files_listbox.curselection()
         if selection:
-            self.stop_video()
-            self.audio.stop()
             video_name = self.files_listbox.get(selection[0])
             self.current_video = os.path.join(self.current_folder, video_name)
-            self.load_video()
+            self.update_selected_display()
             self.load_annotations()
-    
-    def load_video(self):
-        if self.cap:
-            self.cap.release()
-        
-        self.cap = cv2.VideoCapture(self.current_video)
-        self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        self.is_playing = False
-        self.play_button.config(text="▶ Play")
-        self.timeline_var.set(0)
-        self.show_frame()
-        self.update_timeline()
-    
+            try:
+                if sys.platform == 'darwin':
+                    subprocess.Popen(['open', self.current_video])
+                elif os.name == 'nt':
+                    os.startfile(self.current_video)
+                else:
+                    subprocess.Popen(['xdg-open', self.current_video])
+            except Exception:
+                pass
+
     def load_annotations(self):
-        json_path = os.path.splitext(self.current_video)[0] + ".json"
+        if not self.current_video:
+            return
+        json_path = os.path.splitext(self.current_video)[0] + "_mlva.json"
         if os.path.exists(json_path):
             try:
                 with open(json_path, 'r') as f:
@@ -528,144 +398,65 @@ class MLVAApp:
                         self.label_states[label] = state
                         if label in self.label_switches:
                             self.label_switches[label].set_state(bool(state))
-            except:
+            except Exception:
                 self.reset_labels()
         else:
             self.reset_labels()
-    
+
     def reset_labels(self):
         for label in self.labels_config:
             self.label_states[label] = 0
             if label in self.label_switches:
                 self.label_switches[label].set_state(False)
-    
+
     def show_frame(self):
-        if self.cap and self.cap.isOpened():
-            ret, frame = self.cap.read()
-            if ret:
-                self.current_frame = frame
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                
-                label_width = self.video_label.winfo_width()
-                label_height = self.video_label.winfo_height()
-                
-                if label_width > 1 and label_height > 1:
-                    h, w = frame.shape[:2]
-                    aspect = w / h
-                    
-                    if label_width / label_height > aspect:
-                        new_height = label_height
-                        new_width = int(aspect * new_height)
-                    else:
-                        new_width = label_width
-                        new_height = int(new_width / aspect)
-                    
-                    frame = cv2.resize(frame, (new_width, new_height))
-                
-                img = Image.fromarray(frame)
-                imgtk = ImageTk.PhotoImage(image=img)
-                self.video_label.imgtk = imgtk
-                self.video_label.configure(image=imgtk, text="")
-    
+        pass
+
     def toggle_play(self):
-        if not self.cap:
-            return
-        
-        self.is_playing = not self.is_playing
-        self.play_button.config(text="⏸ Pause" if self.is_playing else "▶ Play")
-        
-        if self.is_playing:
-            self.start_audio()
-            threading.Thread(target=self.play_video, daemon=True).start()
-        else:
-            self.audio.stop()
-    
+        pass
+
     def start_audio(self):
-        if not self.current_video:
-            return
-        
-        self.audio.stop()
-        
-        current_frame = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
-        start_time = current_frame / self.fps if self.fps > 0 else 0
-        self.audio.start(self.current_video, start_time=start_time, volume=self.volume)
-    
+        pass
+
     def stop_audio(self):
-        self.audio.stop()
-    
+        pass
+
     def restart_audio(self):
-        if self.is_playing:
-            current_frame = self.cap.get(cv2.CAP_PROP_POS_FRAMES)
-            start_time = current_frame / self.fps if self.fps > 0 else 0
-            self.audio.restart(self.current_video, start_time=start_time, volume=self.volume)
-    
+        pass
+
     def play_video(self):
-        while self.is_playing and self.cap and self.cap.isOpened():
-            ret, frame = self.cap.read()
-            if ret:
-                self.current_frame = frame
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                
-                label_width = self.video_label.winfo_width()
-                label_height = self.video_label.winfo_height()
-                
-                if label_width > 1 and label_height > 1:
-                    h, w = frame.shape[:2]
-                    aspect = w / h
-                    
-                    if label_width / label_height > aspect:
-                        new_height = label_height
-                        new_width = int(aspect * new_height)
-                    else:
-                        new_width = label_width
-                        new_height = int(new_width / aspect)
-                    
-                    frame = cv2.resize(frame, (new_width, new_height))
-                
-                img = Image.fromarray(frame)
-                imgtk = ImageTk.PhotoImage(image=img)
-                self.video_label.imgtk = imgtk
-                self.video_label.configure(image=imgtk)
-                
-                self.update_timeline()
-                
-                fps = self.cap.get(cv2.CAP_PROP_FPS)
-                time.sleep(1/fps if fps > 0 else 0.033)
-            else:
-                self.is_playing = False
-                self.play_button.config(text="▶ Play")
-                self.audio.stop()
-                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                self.update_timeline()
-                break
-    
+        pass
+
     def stop_video(self):
-        self.is_playing = False
-        self.audio.stop()
-        if hasattr(self, 'play_button'):
-            self.play_button.config(text="▶ Play")
-    
+        pass
+
     def save_annotations(self):
         if not self.current_video:
             messagebox.showwarning("No Video", "Please select a video first.")
             return
-        
-        json_path = os.path.splitext(self.current_video)[0] + ".json"
-        
+        json_path = os.path.splitext(self.current_video)[0] + "_mlva.json"
         now = datetime.now()
         annotation_time = now.strftime("%H:%M:%S-%d/%m/%Y")
-        
+        labels_present = {label: 1 for label, state in self.label_states.items() if state}
         data = {
-            "MLVA_labels": {label: self.label_states.get(label, 0) for label in self.labels_config},
+            "MLVA_labels": labels_present,
             "annotation_time": annotation_time
         }
-        
-        with open(json_path, 'w') as f:
-            json.dump(data, f, indent=2)
-        
-        messagebox.showinfo("Saved", f"Annotations saved to:\n{json_path}")
-    
+        try:
+            with open(json_path, 'w') as f:
+                json.dump(data, f, indent=2)
+            messagebox.showinfo("Saved", f"Annotations saved to:\n{json_path}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save annotations:\n{e}")
+
     def __del__(self):
-        self.audio.stop()
-        if self.cap:
-            self.cap.release()
+        pass
+
+    def update_selected_display(self):
+        if self.current_video:
+            name = os.path.basename(self.current_video)
+            self.selected_label.config(text=name)
+            self.selected_path.config(text=os.path.splitext(self.current_video)[0] + "_mlva.json")
+        else:
+            self.selected_label.config(text="No video selected")
+            self.selected_path.config(text="")
